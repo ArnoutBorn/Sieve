@@ -1,0 +1,91 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- master
+
+pool:
+  name: Default
+  demands:
+  - Agent.OS -equals linux
+
+jobs:
+  - job: SetupGitVersion
+    displayName: Setup GitVersion
+    steps:
+      - task: gitversion/setup@0
+        displayName: Setup GitVersion
+        inputs:
+          versionSpec: '5.x'
+      - task: gitversion/execute@0
+        displayName: Execute GitVersion
+      - task: GitVersion@5
+        enabled: false
+        name: GitVersion
+        inputs:
+          runtime: 'core'
+          preferBundledVersion: false
+      - bash: |
+          echo "##vso[task.setvariable variable=GITVERSION;isOutput=true;]$(GitVersion.SemVer)"
+          echo "variable value is $(GitVersion.SemVer)"
+        name: JobGitVersion
+  # - job: BuildService
+  #   displayName: Build
+  #   condition: succeeded()
+  #   dependsOn: SetupGitVersion
+  #   variables:
+  #     SemVer: $[ dependencies.SetupGitVersion.outputs['JobGitVersion.GITVERSION'] ]
+  #   steps:
+  #     - task: NuGetAuthenticate@0
+  #       inputs:
+  #         nuGetServiceConnections: 'Nuget Azure'
+  #         forceReinstallCredentialProvider: true
+  #     - task: DotNetCoreCLI@2
+  #       displayName: Restore
+  #       inputs:
+  #         command: 'restore'
+  #         projects: './Sieve/Sieve.csproj'
+  #         feedsToUse: 'select'
+  #         vstsFeed: 'dbaf1f5a-1651-4bc6-976e-a66c70b9fe73/1d924fcf-d598-441e-8542-8ef65d6f2470'
+  #         includeNuGetOrg: false
+  #     - task: DotNetCoreCLI@2
+  #       displayName: Build Sieve
+  #       inputs:
+  #         command: 'build'
+  #         projects: './Sieve/Sieve.csproj'
+  #         arguments: '-o $(Build.ArtifactStagingDirectory)/binaries'
+  - job: PackAssemblies
+    displayName: Build and push to nuget
+    condition: succeeded()
+    dependsOn: 
+    - SetupGitVersion
+    variables:
+      SemVer: $[ dependencies.SetupGitVersion.outputs['JobGitVersion.GITVERSION'] ]
+    steps:
+      - script: >
+          echo $(SemVer)
+        continueOnError: true
+        displayName: Display gitversion
+      - task: NuGetAuthenticate@0
+        inputs:
+          nuGetServiceConnections: 'Nuget Azure'
+          forceReinstallCredentialProvider: true
+      - task: DotNetCoreCLI@2
+        displayName: 'dotnet pack sieve'
+        inputs:
+          command: pack
+          packagesToPack: './Sieve/*.csproj'
+          versioningScheme: byEnvVar
+          versionEnvVar: 'SemVer'
+          feedsToUse: 'select'
+          nuGetFeedType: internal
+          vstsFeed: 'dbaf1f5a-1651-4bc6-976e-a66c70b9fe73/1d924fcf-d598-441e-8542-8ef65d6f2470'
+      - task: DotNetCoreCLI@2
+        displayName: 'dotnet nuget push'
+        inputs:
+          command: 'push'
+          packagesToPush: '$(Build.ArtifactStagingDirectory)/*.nupkg'
+          nuGetFeedType: 'internal'
+          publishVstsFeed: 'dbaf1f5a-1651-4bc6-976e-a66c70b9fe73/1d924fcf-d598-441e-8542-8ef65d6f2470'
